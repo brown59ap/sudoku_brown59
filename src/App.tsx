@@ -1,119 +1,14 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
-
-type Difficulty = 'easy' | 'medium' | 'hard' | 'expert';
-type CellValue = number | null;
-type Board = CellValue[][];
-type Notes = Set<number>[][];
-
-const GRID_SIZE = 9;
-const BOX_SIZE = 3;
-
-// ===== Sudoku Generator =====
-function shuffleArray<T>(arr: T[]): T[] {
-  const a = [...arr];
-  for (let i = a.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [a[i], a[j]] = [a[j], a[i]];
-  }
-  return a;
-}
-
-function isValidPlacement(board: Board, row: number, col: number, num: number): boolean {
-  for (let c = 0; c < GRID_SIZE; c++) {
-    if (c !== col && board[row][c] === num) return false;
-  }
-  for (let r = 0; r < GRID_SIZE; r++) {
-    if (r !== row && board[r][col] === num) return false;
-  }
-  const boxRow = Math.floor(row / BOX_SIZE) * BOX_SIZE;
-  const boxCol = Math.floor(col / BOX_SIZE) * BOX_SIZE;
-  for (let r = boxRow; r < boxRow + BOX_SIZE; r++) {
-    for (let c = boxCol; c < boxCol + BOX_SIZE; c++) {
-      if (r !== row && c !== col && board[r][c] === num) return false;
-    }
-  }
-  return true;
-}
-
-function solveSudoku(board: Board): boolean {
-  for (let r = 0; r < GRID_SIZE; r++) {
-    for (let c = 0; c < GRID_SIZE; c++) {
-      if (board[r][c] === null) {
-        const nums = shuffleArray([1, 2, 3, 4, 5, 6, 7, 8, 9]);
-        for (const num of nums) {
-          if (isValidPlacement(board, r, c, num)) {
-            board[r][c] = num;
-            if (solveSudoku(board)) return true;
-            board[r][c] = null;
-          }
-        }
-        return false;
-      }
-    }
-  }
-  return true;
-}
-
-function generateSolution(): Board {
-  const board: Board = Array.from({ length: GRID_SIZE }, () => Array(GRID_SIZE).fill(null));
-  solveSudoku(board);
-  return board;
-}
-
-function countSolutions(board: Board, limit: number = 2): number {
-  let count = 0;
-  function solve(b: Board): boolean {
-    for (let r = 0; r < GRID_SIZE; r++) {
-      for (let c = 0; c < GRID_SIZE; c++) {
-        if (b[r][c] === null) {
-          for (let num = 1; num <= 9; num++) {
-            if (isValidPlacement(b, r, c, num)) {
-              b[r][c] = num;
-              if (solve(b)) return true;
-              b[r][c] = null;
-            }
-          }
-          return false;
-        }
-      }
-    }
-    count++;
-    return count >= limit;
-  }
-  const copy = board.map(row => [...row]);
-  solve(copy);
-  return count;
-}
-
-function generatePuzzle(difficulty: Difficulty): { puzzle: Board; solution: Board } {
-  const solution = generateSolution();
-  const puzzle: Board = solution.map(row => [...row]);
-
-  const cellsToRemove: Record<Difficulty, number> = {
-    easy: 35,
-    medium: 45,
-    hard: 52,
-    expert: 58,
-  };
-
-  let toRemove = cellsToRemove[difficulty];
-  const positions = shuffleArray(
-    Array.from({ length: 81 }, (_, i) => [Math.floor(i / 9), i % 9] as [number, number])
-  );
-
-  for (const [r, c] of positions) {
-    if (toRemove <= 0) break;
-    const backup = puzzle[r][c];
-    puzzle[r][c] = null;
-    if (countSolutions(puzzle) === 1) {
-      toRemove--;
-    } else {
-      puzzle[r][c] = backup;
-    }
-  }
-
-  return { puzzle, solution };
-}
+import {
+  type Difficulty,
+  type Board,
+  type Notes,
+  generatePuzzle,
+  createEmptyNotes,
+  isBoardComplete,
+  countNumberOnBoard,
+  formatTime,
+} from './sudoku';
 
 // ===== Timer Hook =====
 function useTimer(isRunning: boolean) {
@@ -135,13 +30,7 @@ function useTimer(isRunning: boolean) {
 
   const reset = () => setSeconds(0);
 
-  const format = (s: number) => {
-    const m = Math.floor(s / 60);
-    const sec = s % 60;
-    return `${m.toString().padStart(2, '0')}:${sec.toString().padStart(2, '0')}`;
-  };
-
-  return { seconds, formatted: format(seconds), reset };
+  return { seconds, formatted: formatTime(seconds), reset };
 }
 
 // ===== Main App =====
@@ -175,11 +64,7 @@ export default function App() {
       setIsPlaying(true);
       setNotesMode(false);
       setHintsUsed(0);
-      setNotes(
-        Array.from({ length: 9 }, () =>
-          Array.from({ length: 9 }, () => new Set<number>())
-        )
-      );
+      setNotes(createEmptyNotes());
       resetTimer();
       setIsGenerating(false);
     }, 50);
@@ -189,14 +74,7 @@ export default function App() {
     startNewGame(difficulty);
   }, []);
 
-  const checkCompletion = useCallback((b: Board) => {
-    for (let r = 0; r < 9; r++) {
-      for (let c = 0; c < 9; c++) {
-        if (b[r][c] !== solution[r][c]) return false;
-      }
-    }
-    return true;
-  }, [solution]);
+  const checkCompletion = useCallback((b: Board) => isBoardComplete(b, solution), [solution]);
 
   const placeNumber = useCallback((num: number) => {
     if (!selectedCell || isComplete) return;
@@ -366,15 +244,7 @@ export default function App() {
     return classes.join(' ');
   };
 
-  const getNumberCount = (num: number): number => {
-    let count = 0;
-    for (let r = 0; r < 9; r++) {
-      for (let c = 0; c < 9; c++) {
-        if (board[r]?.[c] === num) count++;
-      }
-    }
-    return count;
-  };
+  const getNumberCount = (num: number): number => countNumberOnBoard(board, num);
 
   const difficultyLabels: Record<Difficulty, string> = {
     easy: 'Легко',
